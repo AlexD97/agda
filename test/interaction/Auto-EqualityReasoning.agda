@@ -25,4 +25,3 @@ module AdditionCommutative where
  addcommut zero (succ x) = sym (cong succ (addcommut x zero))  -- solution does not pass termination check
  addcommut (succ x) m = begin (succ (x + m) ≡⟨ cong succ (addcommut x m) ⟩ (succ (m + x) ≡⟨ sym (lemma' m x) ⟩ ((m + succ x) ∎)))
 -}
-

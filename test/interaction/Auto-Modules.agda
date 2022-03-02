@@ -46,4 +46,3 @@ module Setoid (X : Set)
  trans : ∀ {x₁ x₂ x₃} → Eq x₁ x₂ → Eq x₂ x₃ → Eq x₁ x₃
  trans = {!!}  -- hole 5
 -- trans = λ {x₁} {x₂} {x₃} z z₁ → subst (Eq x₁) z₁ z
-

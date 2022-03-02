@@ -13,7 +13,6 @@ import Control.Concurrent
 import Control.Concurrent.Async
 import Control.Concurrent.STM.TChan
 import Control.Concurrent.STM.TVar
-
 import qualified Control.Exception  as E
 
 import Control.Monad
@@ -73,6 +72,8 @@ import Agda.Interaction.Highlighting.Generate
 import Agda.Compiler.Backend
 
 import Agda.Auto.Auto as Auto
+import Agda.Mimer.Mimer as Mimer
+import qualified Control.DeepSeq as DeepSeq
 
 import Agda.Utils.Either
 import Agda.Utils.FileName
@@ -489,6 +490,7 @@ updateInteractionPointsAfter Cmd_intro{}                         = True
 updateInteractionPointsAfter Cmd_refine_or_intro{}               = True
 updateInteractionPointsAfter Cmd_autoOne{}                       = True
 updateInteractionPointsAfter Cmd_autoAll{}                       = True
+updateInteractionPointsAfter Cmd_mimer{}                         = True
 updateInteractionPointsAfter Cmd_context{}                       = False
 updateInteractionPointsAfter Cmd_helper_function{}               = False
 updateInteractionPointsAfter Cmd_infer{}                         = False
@@ -696,7 +698,13 @@ interpret (Cmd_autoOne ii rng hint) = do
   -- Save the state to have access to even those interaction ids
   -- that Auto solves (since Auto gives the solution right away).
   st <- getTC
+  startTime <- liftIO $ getCPUTime
   (time , res) <- maybeTimed $ Auto.auto ii rng hint
+  elapsed <- let calc = do stopTime <- liftIO $ getCPUTime; return $ Just $ stopTime - startTime
+             in case autoProgress res of
+                Solutions (_:_) -> calc
+                FunClauses{} -> calc
+                _ -> return Nothing
   case autoProgress res of
    Solutions sols -> do
     lift $ reportSLn "auto" 10 $ "Auto produced the following solutions " ++ show sols
@@ -740,6 +748,27 @@ interpret Cmd_autoAll = do
             return jj
         _ -> return []
     modifyTheInteractionPoints (List.\\ concat solved)
+
+interpret (Cmd_mimer ii rng str) = do
+  -- TODO: This way of measuring time does not work
+  (time, result) <- maybeTimed $ Mimer.mimer ii rng str
+  case result of
+    MimerExpr str -> do
+      putResponse $ Resp_GiveAction ii $ Give_String str
+    MimerClauses f cs -> do
+      let casectxt = Nothing
+      -- TODO: This part is copied from the makecase tactic
+      liftCommandMT (withInteractionId ii) $ do
+        tel <- lift $ lookupSection (qnameModule f) -- don't shadow the names in this telescope
+        unicode <- getsTC $ optUseUnicode . getPragmaOptions
+        pcs      :: [Doc]      <- lift $ inTopContext $ addContext tel $ mapM prettyA cs
+        let pcs' :: [String]    = List.map (extlam_dropName unicode casectxt . decorate) pcs
+        putResponse $ Resp_MakeCase ii (makeCaseVariant casectxt) pcs'
+    MimerNoResult -> display_info $ Info_Auto "No solution found"
+  -- case result of
+  --   Just (_, ns@(_:_)) -> interpret (Cmd_make_case ii rng (unwords ns))
+  --   _ -> return ()
+  maybe (return ()) (display_info . Info_Time) time
 
 interpret (Cmd_context norm ii _ _) =
   display_info . Info_Context ii =<< liftLocalState (B.getResponseContext norm ii)
@@ -816,25 +845,7 @@ interpret (Cmd_make_case ii rng s) = do
         ]
       ]
     putResponse $ Resp_MakeCase ii (makeCaseVariant casectxt) pcs'
-  where
-    decorate = renderStyle (style { mode = OneLineMode })
 
-    makeCaseVariant :: CaseContext -> MakeCaseVariant
-    makeCaseVariant Nothing = R.Function
-    makeCaseVariant Just{}  = R.ExtendedLambda
-
-    -- very dirty hack, string manipulation by dropping the function name
-    -- and replacing the last " = " with " -> ". It's important not to replace
-    -- the equal sign in named implicit with an arrow!
-    extlam_dropName :: UnicodeOrAscii -> CaseContext -> String -> String
-    extlam_dropName _ Nothing x = x
-    extlam_dropName glyphMode Just{}  x
-        = unwords $ reverse $ replEquals $ reverse $ drop 1 $ words x
-      where
-        arrow = render $ _arrow $ specialCharactersForGlyphs glyphMode
-        replEquals ("=" : ws) = arrow : ws
-        replEquals (w   : ws) = w : replEquals ws
-        replEquals []         = []
 
 interpret (Cmd_compute cmode ii rng s) = do
   expr <- liftLocalState $ do
@@ -846,6 +857,27 @@ interpret Cmd_show_version = display_info Info_Version
 
 interpret Cmd_abort = return ()
 interpret Cmd_exit  = return ()
+
+
+decorate :: Doc -> String
+decorate = renderStyle (style { mode = OneLineMode })
+
+makeCaseVariant :: CaseContext -> MakeCaseVariant
+makeCaseVariant Nothing = R.Function
+makeCaseVariant Just{}  = R.ExtendedLambda
+
+-- very dirty hack, string manipulation by dropping the function name
+-- and replacing the last " = " with " -> ". It's important not to replace
+-- the equal sign in named implicit with an arrow!
+extlam_dropName :: UnicodeOrAscii -> CaseContext -> String -> String
+extlam_dropName _ Nothing x = x
+extlam_dropName glyphMode Just{}  x
+    = unwords $ reverse $ replEquals $ reverse $ drop 1 $ words x
+  where
+    arrow = render $ _arrow $ specialCharactersForGlyphs glyphMode
+    replEquals ("=" : ws) = arrow : ws
+    replEquals (w   : ws) = w : replEquals ws
+    replEquals []         = []
 
 -- | Solved goals already instantiated internally
 -- The second argument potentially limits it to one specific goal.

@@ -12,7 +12,7 @@ import qualified Agda.Syntax.Abstract as A
 import qualified Agda.Syntax.Abstract.Name as AN
 import Agda.Utils.Maybe (catMaybes)
 
-type MilliSeconds = Int
+type MilliSeconds = Integer
 
 data HintMode = Unqualified | AllModules | Module | NoHints
   deriving (Eq, Show)
@@ -30,7 +30,7 @@ parseOptions ii range argStr = do
   hintExprs <- sequence [parseExprIn ii range h | H h <- tokens]
   let hints = catMaybes $ map hintExprToQName hintExprs
   return Options
-    { optTimeout = firstOr 1000 [parseTime t | T t <- tokens]
+    { optTimeout = firstOr 1000 [fromIntegral $ parseTime t | T t <- tokens]
     -- TODO: Do arg properly
     , optHintMode = firstOr NoHints ([Module | M <- tokens] ++ [Unqualified | R <- tokens])
     , optExplicitHints = hints

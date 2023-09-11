@@ -22,7 +22,6 @@ import qualified Data.Set as Set
 import Data.Maybe (maybeToList, fromMaybe, maybe, isNothing)
 import Data.PQueue.Min (MinQueue)
 import qualified Data.PQueue.Min as Q
-import Data.Time.Clock (diffUTCTime, getCurrentTime, secondsToNominalDiffTime)
 import GHC.Generics (Generic)
 import qualified Text.PrettyPrint.Boxes as Box
 import qualified Data.Text as Text
@@ -63,7 +62,7 @@ import Agda.Utils.Maybe (catMaybes)
 import Agda.Utils.Monad (ifM)
 import qualified Agda.Utils.Maybe.Strict as SMaybe
 -- import Agda.Utils.Permutation (idP, permute, takeP)
-import Agda.Utils.Time (CPUTime(..), getCPUTime)
+import Agda.Utils.Time (CPUTime(..), getCPUTime, fromMilliseconds)
 import Agda.Utils.Tuple (mapFst, mapSnd)
 import Agda.Utils.FileName (AbsolutePath(..))
 
@@ -786,15 +785,15 @@ runSearch options stopAfterFirst ii rng = withInteractionId ii $ do
       flip runReaderT searchOptions $ bench [Bench.Deserialization] $ do
 
         -- TODO: Check what timing stuff is used in Agda.Utils.Time
-        timeout <- secondsToNominalDiffTime . (/1000) . fromIntegral <$> asks searchTimeout
-        startTime <- liftIO $ getCurrentTime
+        timeout <- fromMilliseconds <$> asks searchTimeout
+        startTime <- liftIO getCPUTime
         let go :: Int -> MinQueue SearchBranch -> SM ([MimerResult], Int)
             go n branchQueue = case Q.minView branchQueue of
               Nothing -> do
                 reportSLn "mimer.search" 30 $ "No remaining search branches."
                 return ([], n)
               Just (branch, branchQueue') -> do
-                time <- liftIO $ getCurrentTime
+                time <- liftIO getCPUTime
 
                 reportSMDoc "mimer.search" 40 $ do
                   inst <- branchInstantiationDocCost branch
@@ -807,7 +806,7 @@ runSearch options stopAfterFirst ii rng = withInteractionId ii $ do
                   is <- mapM branchInstantiationDocCost $ Q.toAscList branchQueue'
                   return $ "Instantiation of other branches:" <+> prettyList is
 
-                let elapsed = diffUTCTime time startTime
+                let elapsed = time - startTime
                 if elapsed < timeout
                 then do
                   (newBranches, sols) <- refine branch >>= partitionStepResult

@@ -822,13 +822,13 @@ runSearch options stopAfterFirst ii rng = withInteractionId ii $ do
                   then case sols of
                          [] -> do
                            reportSLn "mimer.search" 40 $ "Continuing search"
-                           go (n+1) branchQueue''
+                           go (n + 1) branchQueue''
                          _ -> do
                            reportSLn "mimer.search" 40 $ "Search done (stopping after first solution)"
                            return (sols, n)
                   else do
                     reportSLn "mimer.search" 40 $ "Continuing search"
-                    mapFst (sols ++) <$> go (n+1) branchQueue''
+                    mapFst (sols ++) <$> go (n + 1) branchQueue''
                 else do
                   reportSLn "mimer.search" 30 $ "Search time limit reached. Elapsed search time: " ++ show elapsed
                   return ([], n)

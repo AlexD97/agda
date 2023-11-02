@@ -737,18 +737,6 @@ runSearch options stopAfterFirst ii rng = withInteractionId ii $ do
                  {- else -} (return defaultCosts)
       components <- collectComponents options costs ii mTheFunctionQName whereNames metaId
 
-      -- splitVars <- getOpen (hintSplitVars components)
-      -- splitString <- unwords <$> (mapM (fmap render . prettyTCM) splitVars) :: TCM String
-      -- (sqname, caseCxt, clauses) <- makeCase ii rng splitString
-      -- reportSDoc "mimer.split" 50 $ do
-      --   rhss = map (rhsExpr . clauseRHS
-      --   return $ "Result of makeCase:" $+$ nest 2 (
-      --            "Qname:" <+> pretty sqname $+$
-      --            -- "CaseContext:" <+> text (show caseCxt) $+$
-      --            -- "Clauses:" <+> text (show clauses)
-      --            "New rhss:" <+>
-      --            )
-
       startGoals <- mapM mkGoal metaIds
       let startBranch = SearchBranch
             { sbTCState = state
@@ -843,55 +831,6 @@ runSearch options stopAfterFirst ii rng = withInteractionId ii $ do
           stats <- liftIO $ readIORef ref
           return $ "Statistics:" <+> text (show stats)
         return sols
-
-doCaseSplit :: InteractionId -> TCM (Maybe A.Clause)
-doCaseSplit ii = do
-  -- TODO: This first part is pretty much cloned form makeCase in MakeCase.hs
-  -- Get function clause which contains the interaction point.
-  InteractionPoint { ipMeta = mm, ipClause = ipCl} <- lookupInteractionPoint ii
-  case ipCl of
-    IPNoClause -> return Nothing
-    IPClause f clauseNo clTy clWithSub absCl clClos -> do
-      (casectxt, (prevClauses0, _clause, follClauses0)) <- getClauseZipperForIP f clauseNo
-
-      -- Instead of using the actual internal clause, we retype check the abstract clause (with
-      -- eMakeCase = True). This disables the forcing translation in the unifier, which allows us to
-      -- split on forced variables.
-      -- (clause, clauseCxt, clauseAsBindings) <-
-      --   enterClosure clClos $ \ _ -> locallyTC eMakeCase (const True) $
-      --     recheckAbstractClause clTy clWithSub absCl
-
-      info <- getConstInfo f
-      case theDef info of
-        fnDef@Function{} -> do
-          let origClause = funClauses fnDef !! clauseNo
-          instClauseBody <- sequence $ instantiateFull <$> (clauseBody origClause)
-          let namedClause = NamedClause f False {- TODO -} origClause{clauseBody = instClauseBody}
-          aClause <- reify namedClause
-          return $ Just aClause
-        _ -> return Nothing
-
-      -- let rhs = A.clauseRHS absCl
-      --     perm = fromMaybe __IMPOSSIBLE__ $ clausePerm clause
-      --     tel  = clauseTel  clause
-      --     ps   = namedClausePats clause
-      --     ell  = clauseEllipsis clause
-
-      -- -- First, get context names of the clause.
-      -- let clauseCxtNames = map (fst . unDom) clauseCxt
-      -- -- Valid names to split on are pattern variables of the clause,
-      -- -- plus as-bindings that refer to a variable.
-      -- let clauseVars = zip clauseCxtNames (map var [0..]) ++
-      --                 map (\(AsB name v _ _) -> (name,v)) clauseAsBindings
-
-      -- let fvs = maybe [] freeVars (clauseBody clause)
-
-      -- -- TODO REMOVE!
-      -- _ <- do
-      --         ctx <- getContextArgs
-      --         t' <- t `piApplyM` permute (takeP (length ctx) $ mvPermutation mv) ctx
-      --         nowSolvingConstraints $ assign DirEq mi ctx (Var 0 []) (AsTermsOf t')
-      -- let conClause = toConcrete aClause
 
 tryComponents :: Goal -> Type -> SearchBranch -> [(Component, [Component])] -> SM [SearchStepResult]
 tryComponents goal goalType branch comps = withBranchAndGoal branch goal $ do
@@ -1378,25 +1317,6 @@ tryRefineWith goal goalType branch comp = withBranchAndGoal branch goal $ do
       reportSMDoc "mimer.refine" 50 $ "Refinement failed"
       return Nothing
 
--- tryRefineWith :: Goal -> Type -> SearchBranch -> Component -> SM (Maybe SearchBranch)
--- tryRefineWith goal goalType branch comp = withBranchAndGoal branch goal $ do
---   reportSMDoc "mimer.refine" 50 $ do
---     cxt <- getContextTelescope >>= prettyTCM
---     hi <- prettyTCM $ compTerm comp
---     ht <- prettyTCM $ compType comp
---     gm <- prettyTCM $ goalMeta goal
---     gt <- prettyTCM goalType
---     return $ "Trying refinement" <+> hi <+> ":" <+> ht $+$ nest 2 ("for" <+> gm <+> ":" <+> gt $+$ "in context" <+> cxt)
-
---   tryRefineWith' goal goalType comp >>= \case
---     Just (newMetas1, newMetas2) -> do
---       reportSMDoc "mimer.refine" 50 $ "Refinement succeeded"
---       Just <$> updateBranchCost comp (newMetaIds1 ++ newMetaIds2 ++ compMetas comp) branch
---     Nothing -> do
---       updateStat incRefineFail
---       reportSMDoc "mimer.refine" 50 $ "Refinement failed"
---       return Nothing
-
 tryRefineWith' :: Goal -> Type -> Component -> SM (Maybe ([MetaId], [MetaId]))
 tryRefineWith' goal goalType comp = do
   metasCreatedBy (dumbUnifier (compType comp) goalType) >>= \case
@@ -1422,8 +1342,8 @@ tryRefineAddMetas = tryRefineAddMetasSkip 0
 -- TODO: Rewrite with Component?
 -- NOTE: The new metas are in left-to-right order -- the opposite of the
 -- order they should be solved in.
-applyToMetas' :: Nat -> Term -> Type -> SM (Term, Type, [MetaId])
-applyToMetas' skip term typ = do
+applyToMetas :: Nat -> Term -> Type -> SM (Term, Type, [MetaId])
+applyToMetas skip term typ = do
   ctx <- getContextTelescope
   case unEl typ of
     Pi dom abs -> do
@@ -1434,14 +1354,10 @@ applyToMetas' skip term typ = do
       newType <- bench [Bench.Deserialization, Bench.Reduce] $ reduce =<< piApplyM typ metaTerm -- TODO: Is this the best place to reduce?
       -- For records, the parameters are not included in the term
       let newTerm = if skip > 0 then term else apply term [arg]
-      (term', typ', metas) <- applyToMetas' (predNat skip) newTerm newType
+      (term', typ', metas) <- applyToMetas (predNat skip) newTerm newType
       return (term', typ', metaId' : metas)
     _ -> return (term, typ, [])
 
-
--- TODO: Remove this version (it is just for bench-marking)
-applyToMetas :: Nat -> Term -> Type -> SM (Term, Type, [MetaId])
-applyToMetas skip term typ = bench [Bench.Deserialization, Bench.Generalize] $ applyToMetas' skip term typ
 
 checkSolved :: SearchBranch -> SM SearchStepResult
 checkSolved branch = do
@@ -1452,12 +1368,7 @@ checkSolved branch = do
     metaArgs <- getMetaContextArgs topMeta
     inst <- instantiateFull $ apply (MetaV topMetaId []) metaArgs
     case allMetas (:[]) inst of
-      [] -> do
-        -- topMetaInst <- mvInstantiation <$> lookupLocalMeta topMeta
-        -- if isOpenMeta topMetaInst
-        -- -- No remaining meta-variables, but
-        -- then return NoSolution
-        ResultExpr <$> reify inst
+      [] -> ResultExpr <$> reify inst
       metaIds -> do
         goals' <- mapM mkGoal metaIds
         return $ OpenBranch $ branch{sbGoals = reverse goals'}
@@ -1466,33 +1377,6 @@ setAt :: Int -> a -> [a] -> [a]
 setAt i x xs = case splitAt i xs of
   (ls, _r:rs) -> ls ++ (x : rs)
   _ -> error "setAt: index out of bounds"
-
--- checkSolved :: SearchBranch -> SM SearchStepResult
--- checkSolved branch = {-# SCC "custom-checkSolved" #-} bench [Bench.Deserialization, Bench.Sort] $ do
---   env <- asks searchTopEnv
---   withBranchState branch $ withEnv env $ do
---     openMetas <- getOpenMetas
---     goals' <- concatMapM (updateGoals openMetas) (sbGoals branch)
---     case goals' of
---       [] -> do
---         topMeta <- asks searchTopMeta
---         -- r <- maybe NoSolution ResultExpr <$> (getMetaInstantiation metaId)
---         getMetaInstantiation topMeta >>= \case
---           Nothing -> return NoSolution
---           Just e -> do
---             return (ResultExpr e)
---       _ -> return $ OpenBranch branch{sbGoals = goals'}
---   where
---   updateGoals :: [MetaId] -> Goal -> SM [Goal]
---   updateGoals openMetas goal = let metaId = goalMeta goal in
---     metaInstantiation metaId >>= \case
---       Nothing -> return [goal]
---       Just term -> do
---         instTerm <- instantiate term
---         env <- askTC
---         let newMetas = filter (`elem` openMetas) $ allMetas (:[]) instTerm
---         newGoals <- mapM (\mi -> withMetaId mi $ mkGoal mi) newMetas
---         return $ reverse newGoals
 
 updateBranch' :: Maybe Component -> [MetaId] -> SearchBranch -> SM SearchBranch
 updateBranch' mComp newMetaIds branch = do
@@ -1546,10 +1430,6 @@ assignMeta metaId term metaType = bench [Bench.Deserialization, Bench.CheckRHS] 
           let newMetaIds = Map.keys (openMetas newMetaStore)
           return newMetaIds
 
-
-
--- dumbUnifier :: (MonadTCM tcm, PureTCM tcm, MonadWarning tcm, MonadStatistics tcm, MonadMetaSolver tcm, MonadFresh Int tcm, MonadFresh ProblemId tcm)
---   => Type -> Type -> tcm Bool
 dumbUnifier :: Type -> Type -> SM Bool
 dumbUnifier t1 t2 = bench [Bench.Deserialization, Bench.UnifyIndices] $ do
   updateStat incTypeEqChecks
@@ -1558,7 +1438,6 @@ dumbUnifier t1 t2 = bench [Bench.Deserialization, Bench.UnifyIndices] $ do
       str <- prettyTCM err
       return $ "Unification failed with error:" <+> str
     return False
-
 
 -- Duplicate of a local definition in Agda.Interaction.BasicOps
 showTCM :: (MonadPretty tcm, PrettyTCM a) => a -> tcm String

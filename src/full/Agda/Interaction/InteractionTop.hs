@@ -750,11 +750,14 @@ interpret Cmd_autoAll = do
     modifyTheInteractionPoints (List.\\ concat solved)
 
 interpret (Cmd_mimer ii rng str) = do
-  -- TODO: This way of measuring time does not work
+  iscope <- getInteractionScope ii
   (time, result) <- maybeTimed $ Mimer.mimer ii rng str
   case result of
+    MimerNoResult -> display_info $ Info_Auto "No solution found"
     MimerExpr str -> do
+      insertOldInteractionScope ii iscope
       putResponse $ Resp_GiveAction ii $ Give_String str
+      modifyTheInteractionPoints (List.delete ii)
     MimerClauses f cs -> do
       let casectxt = Nothing
       -- TODO: This part is copied from the makecase tactic
@@ -764,10 +767,6 @@ interpret (Cmd_mimer ii rng str) = do
         pcs      :: [Doc]      <- lift $ inTopContext $ addContext tel $ mapM prettyA cs
         let pcs' :: [String]    = List.map (extlam_dropName unicode casectxt . decorate) pcs
         putResponse $ Resp_MakeCase ii (makeCaseVariant casectxt) pcs'
-    MimerNoResult -> display_info $ Info_Auto "No solution found"
-  -- case result of
-  --   Just (_, ns@(_:_)) -> interpret (Cmd_make_case ii rng (unwords ns))
-  --   _ -> return ()
   maybe (return ()) (display_info . Info_Time) time
 
 interpret (Cmd_context norm ii _ _) =

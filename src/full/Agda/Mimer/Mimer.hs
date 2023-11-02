@@ -1457,9 +1457,7 @@ checkSolved branch = do
         -- if isOpenMeta topMetaInst
         -- -- No remaining meta-variables, but
         -- then return NoSolution
-        expr <- reify inst
-        mAClause <- liftTCM $ doCaseSplit ii -- TODO: REMOVE
-        return $ maybe (ResultExpr expr) (ResultClauses . (:[])) mAClause
+        ResultExpr <$> reify inst
       metaIds -> do
         goals' <- mapM mkGoal metaIds
         return $ OpenBranch $ branch{sbGoals = reverse goals'}

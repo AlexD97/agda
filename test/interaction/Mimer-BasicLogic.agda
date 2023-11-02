@@ -45,9 +45,7 @@ h6 A B C x = {!-c!}
 --h6 A B C (∨-i₂ x) = ∨-i₂ (∨-i₂ x)
 
 h7 : (A : Set) → ⊥ → A
-h7 A x = {!-c!}
--- No solution
-
+h7 A = {!!}
 
 h8 : ∀ A → A → ¬ (¬ A)
 h8 = {!!}
@@ -60,14 +58,15 @@ h9 = {!!}
 h10 : (∀ A → ¬ (¬ A) → A) →
      (∀ A → A ∨ ¬ A)
 h10 = {!!}
---h10 = λ z A →
+-- No solution
+-- h10 = λ z A →
 --         z (A ∨ ((x : A) → ⊥)) (λ z₁ → z₁ (∨-i₂ (λ x → z₁ (∨-i₁ x))))
 
 h11 : (∀ A → A ∨ ¬ A) →
       (∀ A → ¬ (¬ A) → A)
 h11 = {!∨-e ⊥-e!}
 -- No solution
---h11 = λ z A z₁ →
+-- h11 = λ z A z₁ →
 --          ∨-e A ((x : A) → ⊥) A (z A) (λ z₂ → z₂) (λ z₂ → ⊥-e A (z₁ z₂))
 
 
@@ -107,9 +106,8 @@ module Drink where
 
  drink : (A : Set) → (a : A)
             → (Drink : A → Set) → Σ A (λ x → (Drink x) → Π A Drink)
- drink A a Drink = {!RAA!}  -- h17
+ -- drink A a Drink = {!RAA!}  -- h17
  -- No solution
-{-
  drink A a Drink = RAA (Σ A (λ z → (x : Drink z) → Π A Drink))
                      (λ z →
                         z
@@ -120,4 +118,3 @@ module Drink where
                                RAA (Drink a₁)
                                (λ z₁ →
                                   z (Σ-i a₁ (λ x₁ → fun (λ a₂ → RAA (Drink a₂) (λ _ → z₁ x₁)))))))))  -- h17
--}

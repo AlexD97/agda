@@ -453,14 +453,6 @@ library
         -- happy-1.19.8 is packaged with Ubuntu 18.04
 
   exposed-modules:
-      Agda.Auto.Auto
-      Agda.Auto.Options
-      Agda.Auto.CaseSplit
-      Agda.Auto.Convert
-      Agda.Auto.NarrowingSearch
-      Agda.Auto.SearchControl
-      Agda.Auto.Syntax
-      Agda.Auto.Typecheck
       Agda.Benchmarking
       Agda.Compiler.Backend
       Agda.Compiler.Builtin

@@ -1,6 +1,8 @@
 module Agda.Mimer.Options where
+
+import Data.Char
+
 import Agda.Interaction.BasicOps (parseExprIn)
-import Agda.Auto.Options (parseTime)
 import Agda.Syntax.Common (Nat)
 import Agda.Syntax.Common.Pretty (Pretty, pretty, text)
 import Agda.Syntax.Abstract.Name (QName)
@@ -35,6 +37,19 @@ parseOptions ii range argStr = do
     , optHintMode = firstOr NoHints ([Module | M <- tokens] ++ [Unqualified | R <- tokens])
     , optExplicitHints = hints
     }
+
+parseTime :: String -> Int
+parseTime [] = 0
+parseTime xs = read ds * modifier + parseTime r where
+  (ds , modr) = span isDigit xs
+  (mod , r)   = break isDigit modr
+
+  modifier = case mod of
+    "ms" -> 1
+    "cs" -> 10
+    "ds" -> 100
+    "s"  -> 1000
+    _    -> 1000
 
 hintExprToQName :: A.Expr -> Maybe QName
 hintExprToQName (A.ScopedExpr _ e) = hintExprToQName e

@@ -71,7 +71,6 @@ import Agda.Interaction.Highlighting.Generate
 
 import Agda.Compiler.Backend
 
-import Agda.Auto.Auto as Auto
 import Agda.Mimer.Mimer as Mimer
 import qualified Control.DeepSeq as DeepSeq
 
@@ -490,8 +489,6 @@ updateInteractionPointsAfter Cmd_intro{}                         = True
 updateInteractionPointsAfter Cmd_refine_or_intro{}               = True
 updateInteractionPointsAfter Cmd_autoOne{}                       = True
 updateInteractionPointsAfter Cmd_autoAll{}                       = True
-updateInteractionPointsAfter Cmd_mimer{}                         = True
-updateInteractionPointsAfter Cmd_mimerAll{}                      = True
 updateInteractionPointsAfter Cmd_context{}                       = False
 updateInteractionPointsAfter Cmd_helper_function{}               = False
 updateInteractionPointsAfter Cmd_infer{}                         = False
@@ -694,63 +691,7 @@ interpret (Cmd_refine_or_intro pmLambda ii r s) = interpret $
   let s' = trim s
   in (if null s' then Cmd_intro pmLambda else Cmd_refine) ii r s'
 
-interpret (Cmd_autoOne ii rng hint) = do
-  -- Andreas, 2014-07-05 Issue 1226:
-  -- Save the state to have access to even those interaction ids
-  -- that Auto solves (since Auto gives the solution right away).
-  st <- getTC
-  startTime <- liftIO $ getCPUTime
-  (time , res) <- maybeTimed $ Auto.auto ii rng hint
-  elapsed <- let calc = do stopTime <- liftIO $ getCPUTime; return $ Just $ stopTime - startTime
-             in case autoProgress res of
-                Solutions (_:_) -> calc
-                FunClauses{} -> calc
-                _ -> return Nothing
-  case autoProgress res of
-   Solutions sols -> do
-    lift $ reportSLn "auto" 10 $ "Auto produced the following solutions " ++ show sols
-    forM_ sols $ \(ii', sol) -> do
-      -- Andreas, 2014-07-05 Issue 1226:
-      -- For highlighting, Resp_GiveAction needs to access
-      -- the @oldInteractionScope@s of the interaction points solved by Auto.
-      -- We dig them out from the state before Auto was invoked.
-      insertOldInteractionScope ii' =<< liftLocalState (putTC st >> getInteractionScope ii')
-      -- Andreas, 2014-07-07: NOT TRUE:
-      -- -- Andreas, 2014-07-05: The following should be obsolete,
-      -- -- as Auto has removed the interaction points already:
-      -- modifyTheInteractionPoints $ filter (/= ii)
-      putResponse $ Resp_GiveAction ii' $ Give_String sol
-    -- Andreas, 2014-07-07: Remove the interaction points in one go.
-    modifyTheInteractionPoints (List.\\ (map fst sols))
-    case autoMessage res of
-     Nothing  -> interpret $ Cmd_metas AsIs
-     Just msg -> display_info $ Info_Auto msg
-   FunClauses cs -> do
-    case autoMessage res of
-     Nothing  -> return ()
-     Just msg -> display_info $ Info_Auto msg
-    putResponse $ Resp_MakeCase ii R.Function cs
-   Refinement s -> give_gen WithoutForce ii rng s Refine
-  maybe (return ()) (display_info . Info_Time) time
-
-interpret Cmd_autoAll = do
-  iis <- getInteractionPoints
-  unless (null iis) $ do
-    let time = 1000 `div` length iis
-    st <- getTC
-    solved <- forM iis $ \ ii -> do
-      rng <- getInteractionRange ii
-      res <- Auto.auto ii rng ("-t " ++ show time ++ "ms")
-      case autoProgress res of
-        Solutions sols -> forM sols $ \ (jj, s) -> do
-            oldInteractionScope <- liftLocalState (putTC st >> getInteractionScope jj)
-            insertOldInteractionScope jj oldInteractionScope
-            putResponse $ Resp_GiveAction ii $ Give_String s
-            return jj
-        _ -> return []
-    modifyTheInteractionPoints (List.\\ concat solved)
-
-interpret (Cmd_mimer ii rng str) = do
+interpret (Cmd_autoOne ii rng str) = do
   iscope <- getInteractionScope ii
   (time, result) <- maybeTimed $ Mimer.mimer ii rng str
   case result of
@@ -762,7 +703,7 @@ interpret (Cmd_mimer ii rng str) = do
     MimerClauses{} -> __IMPOSSIBLE__    -- Mimer can't do case splitting yet
   maybe (return ()) (display_info . Info_Time) time
 
-interpret Cmd_mimerAll = do
+interpret Cmd_autoAll = do
   iis <- getInteractionPoints
   getOldScope <- do
     st <- getTC

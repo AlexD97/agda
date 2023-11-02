@@ -174,13 +174,9 @@ data Interaction' range
   | Cmd_solveAll Rewrite
   | Cmd_solveOne Rewrite InteractionId range String
 
-    -- | Solve (all goals / the goal at point) by using Auto.
+    -- | Solve (all goals / the goal at point) by using Mimer proof search.
   | Cmd_autoOne            InteractionId range String
   | Cmd_autoAll
-
-    -- | Solve a goal using Mimer.
-  | Cmd_mimer InteractionId range String
-  | Cmd_mimerAll
 
     -- | Parse the given expression (as if it were defined at the
     -- top-level of the current module) and infer its type.

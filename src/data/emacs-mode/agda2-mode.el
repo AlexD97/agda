@@ -233,9 +233,9 @@ constituents.")
     (agda2-give                              ,(kbd "C-c C-SPC")   (local)        "Give")
     (agda2-elaborate-give                    ,(kbd "C-c C-m")     (local)        "Elaborate and Give")
     (agda2-refine                            "\C-c\C-r"           (local)        "Refine")
-    (agda2-mimer                             "\C-c\C-a"           (local)        "Auto")
-    (agda2-auto-maybe-all                    "\C-c\C-i"           (local)        "Old Auto")
-    (agda2-auto-maybe-all                    ,(kbd "C-c TAB")     (local)        "Old Auto")
+    (agda2-mimer-maybe-all                   "\C-c\C-a"           (local global) "Auto")
+    (agda2-auto-maybe-all                    "\C-c\C-i"           (local global) "Old Auto")
+    (agda2-auto-maybe-all                    ,(kbd "C-c TAB")     (local global) "Old Auto")
     (agda2-make-case                         "\C-c\C-c"           (local)        "Case")
     (agda2-goal-type                         "\C-c\C-t"           (local)        "Goal type")
     (agda2-show-context                      "\C-c\C-e"           (local)        "Context (environment)")
@@ -1391,10 +1391,25 @@ Either only one if point is a goal, or all of them."
                           'agda2-autoAll))
 )
 
+(defun agda2-mimer-maybe-all ()
+  "Run proof search.
+Either only one if point is a goal, or all of them."
+  (interactive)
+  (call-interactively (if (agda2-goal-at (point))
+                          'agda2-mimer
+                          'agda2-mimerAll))
+)
+
 (defun agda2-mimer ()
-  "Run Mimer."
+  "Run proof search on a goal."
   (interactive)
   (agda2-goal-cmd "Cmd_mimer" 'save 'goal))
+
+(defun agda2-mimerAll ()
+  "Solves all goals by simple proof search."
+  (interactive)
+  (agda2-go nil nil 'busy t "Cmd_mimerAll")
+)
 
 (agda2-maybe-normalised-toplevel-asis-noprompt
  agda2-show-goals

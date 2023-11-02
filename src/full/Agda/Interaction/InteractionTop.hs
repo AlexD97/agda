@@ -491,6 +491,7 @@ updateInteractionPointsAfter Cmd_refine_or_intro{}               = True
 updateInteractionPointsAfter Cmd_autoOne{}                       = True
 updateInteractionPointsAfter Cmd_autoAll{}                       = True
 updateInteractionPointsAfter Cmd_mimer{}                         = True
+updateInteractionPointsAfter Cmd_mimerAll{}                      = True
 updateInteractionPointsAfter Cmd_context{}                       = False
 updateInteractionPointsAfter Cmd_helper_function{}               = False
 updateInteractionPointsAfter Cmd_infer{}                         = False
@@ -758,16 +759,28 @@ interpret (Cmd_mimer ii rng str) = do
       insertOldInteractionScope ii iscope
       putResponse $ Resp_GiveAction ii $ Give_String str
       modifyTheInteractionPoints (List.delete ii)
-    MimerClauses f cs -> do
-      let casectxt = Nothing
-      -- TODO: This part is copied from the makecase tactic
-      liftCommandMT (withInteractionId ii) $ do
-        tel <- lift $ lookupSection (qnameModule f) -- don't shadow the names in this telescope
-        unicode <- getsTC $ optUseUnicode . getPragmaOptions
-        pcs      :: [Doc]      <- lift $ inTopContext $ addContext tel $ mapM prettyA cs
-        let pcs' :: [String]    = List.map (extlam_dropName unicode casectxt . decorate) pcs
-        putResponse $ Resp_MakeCase ii (makeCaseVariant casectxt) pcs'
+    MimerClauses{} -> __IMPOSSIBLE__    -- Mimer can't do case splitting yet
   maybe (return ()) (display_info . Info_Time) time
+
+interpret Cmd_mimerAll = do
+  iis <- getInteractionPoints
+  getOldScope <- do
+    st <- getTC
+    pure $ \ ii -> liftLocalState $ putTC st >> getInteractionScope ii
+  unless (null iis) $ do
+    let time = 1000 `div` length iis
+    st <- getTC
+    solved <- fmap concat $ forM iis $ \ ii -> do
+      rng <- getInteractionRange ii
+      res <- Mimer.mimer ii rng ("-t " ++ show time ++ "ms")
+      case res of
+        MimerNoResult -> pure []
+        MimerExpr str -> do
+          insertOldInteractionScope ii =<< getOldScope ii
+          putResponse $ Resp_GiveAction ii $ Give_String str
+          pure [ii]
+        MimerClauses{} -> __IMPOSSIBLE__  -- Mimer can't do case splitting yet
+    modifyTheInteractionPoints (List.\\ solved)
 
 interpret (Cmd_context norm ii _ _) =
   display_info . Info_Context ii =<< liftLocalState (B.getResponseContext norm ii)

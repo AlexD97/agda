@@ -180,6 +180,7 @@ data Interaction' range
 
     -- | Solve a goal using Mimer.
   | Cmd_mimer InteractionId range String
+  | Cmd_mimerAll
 
     -- | Parse the given expression (as if it were defined at the
     -- top-level of the current module) and infer its type.

@@ -1,7 +1,6 @@
 module Agda.Mimer.Mimer
   ( MimerResult(..)
   , mimer
-  , writeTime
   )
   where
 
@@ -33,7 +32,7 @@ import Agda.Syntax.Abstract (Expr(AbsurdLam))
 import qualified Agda.Syntax.Abstract as A
 import qualified Agda.Syntax.Abstract.Views as A
 import Agda.Syntax.Abstract.Name (QName(..), Name(..))
-import Agda.Syntax.Common (InteractionId(..), MetaId(..), ArgInfo(..), defaultArgInfo, Origin(..), ConOrigin(..), Hiding(..), setOrigin, NameId, Nat, namedThing, Arg(..), setHiding, getHiding, ProjOrigin(..), rangedThing, woThing, nameOf)
+import Agda.Syntax.Common (InteractionId(..), MetaId(..), ArgInfo(..), defaultArgInfo, Origin(..), ConOrigin(..), Hiding(..), setOrigin, NameId, Nat, namedThing, Arg(..), setHiding, getHiding, ProjOrigin(..), rangedThing, woThing, nameOf, visible)
 import Agda.Syntax.Common.Pretty (Pretty, Doc, prettyShow, prettyList, render, pretty, braces, prettyList_, text, (<+>), nest, lbrace, rbrace, comma, ($$), vcat, ($+$), align, cat, parens)
 import Agda.Syntax.Info (exprNoRange)
 import Agda.Syntax.Internal -- (Type, Type''(..), Term(..), Dom'(..), Abs(..), arity , ConHead(..), Sort'(..), Level, argFromDom, Level'(..), absurdBody, Dom, namedClausePats, Pattern'(..), dbPatVarIndex)
@@ -344,6 +343,9 @@ newComponent metaIds cost mName term typ = fresh <&> \cId -> mkComponent cId met
 newComponentQ :: MonadFresh CompId m => [MetaId] -> Cost -> QName -> Term -> Type -> m Component
 newComponentQ metaIds cost qname term typ = fresh <&> \cId -> mkComponent cId metaIds cost (Just $ qnameName qname) term typ
 
+addCost :: Cost -> Component -> Component
+addCost cost comp = comp { compCost = cost + compCost comp }
+
 addBranchGoals :: [Goal] -> SearchBranch -> SearchBranch
 addBranchGoals goals branch = branch {sbGoals = goals ++ sbGoals branch}
 
@@ -424,7 +426,7 @@ collectComponents opts costs ii mDefName whereNames metaId = do
 
   splitVars <- makeOpen $ map fst splitVarsTyped
 
-  letVars <- getLetVars (costLocal costs)
+  letVars <- getLetVars (costLet costs)
 
 
   let components = BaseComponents
@@ -480,7 +482,7 @@ collectComponents opts costs ii mDefName whereNames metaId = do
           return comps
         -- If the function is in the same mutual block, do not include it.
         f@Function{}
-          | Just qname == mDefName -> return comps{hintThisFn = Just $ mkComponentQ cId noCost qname (Def qname []) typ}
+          | Just qname == mDefName -> return comps{hintThisFn = Just $ mkComponentQ cId (costRecCall costs) qname (Def qname []) typ}
           | isToLevel typ && isNotMutual qname f
             -> return comps{hintLevel = mkComponentQ cId (costLevel costs) qname (Def qname []) typ : hintLevel comps}
           | isNotMutual qname f && shouldKeep
@@ -655,7 +657,7 @@ incRefineSuccess stats = stats {statRefineSuccess = succ $ statRefineSuccess sta
 incRefineFail    stats = stats {statRefineFail    = succ $ statRefineFail stats}
 
 updateStat :: (MimerStats -> MimerStats) -> SM ()
-updateStat f = verboseS "mimer.stats" 1 $ do
+updateStat f = verboseS "mimer.stats" 10 $ do
   ref <- asks searchStats
   liftIO $ modifyIORef' ref f
 
@@ -1135,8 +1137,8 @@ genRecCalls = asks (hintThisFn . searchBaseComponents) >>= \case
     -- No candidate arguments for a recursive call
     [] -> return []
     recCandTerms -> do
-      localCost <- asks (costLocal . searchCosts)
-      localVars <- getLocalVars localCost
+      Costs{..} <- asks searchCosts
+      localVars <- getLocalVars costLocal
       let recCands = filter (\t -> case compTerm t of v@Var{} -> v `elem` recCandTerms; _ -> False) localVars
 
       let newRecCall = do
@@ -1169,8 +1171,21 @@ genRecCalls = asks (hintThisFn . searchBaseComponents) >>= \case
                 (thisFn', goals') <- newRecCall
                 (newComp:) <$> go thisFn' (drop (length goals' - length goals - 1) goals') args
       (thisFn', argGoals) <- newRecCall
-      go thisFn' argGoals recCands
-
+      comps <- go thisFn' argGoals recCands
+      -- Compute costs for the calls:
+      --  - costNewMeta/costNewHiddenMeta for each unsolved argument
+      --  - zero for solved arguments
+      --  - costLocal for the parameter we recurse on
+      let callCost comp = (costLocal +) . sum <$> argCosts (compTerm comp)
+          argCosts (Def _ elims) = mapM argCost elims
+          argCosts _ = __IMPOSSIBLE__
+          argCost (Apply arg) = instantiate arg <&> \ case
+            Arg h MetaV{} | visible h -> costNewMeta
+                          | otherwise -> costNewHiddenMeta
+            _ -> 0
+          argCost Proj{}   = pure 0
+          argCost IApply{} = pure 0
+      mapM (\ c -> (`addCost` c) <$> callCost c) comps
 
 -- HACK: If the meta-variable is set to run occurs check, assigning a
 -- recursive call to it will cause an error. Therefore, we create a new
@@ -1265,7 +1280,7 @@ tryDataRecord goal goalType branch = withBranchAndGoal branch goal $ do
       setCandidates <- case reducedLevel of
         (Max i [])
           | i > 0 -> do
-              comp <- newComponent [] cost Nothing (Sort $ Type $ Max (i-1) []) goalType
+              comp <- newComponent [] cost Nothing (Sort $ Type $ Max (i - 1) []) goalType
               return [(branch, comp)]
           | otherwise -> return []
         (Max i ps) -> do
@@ -1389,7 +1404,6 @@ updateBranch' mComp newMetaIds branch = do
             Nothing -> return (compCost comp, compsUsed)
             Just name -> case compsUsed Map.!? name of
               Nothing -> return (compCost comp, Map.insert name 1 compsUsed)
-              -- TODO: Currently using: uses^2+1 as cost. Make a parameter?
               Just uses -> do
                 reuseCost <- asks (costCompReuse . searchCosts)
                 return (compCost comp + reuseCost uses, Map.adjust succ name compsUsed)
@@ -1412,11 +1426,6 @@ assignMeta metaId term metaType = bench [Bench.Deserialization, Bench.CheckRHS] 
     metaVar <- lookupLocalMeta metaId
     metaArgs <- getMetaContextArgs metaVar
 
-    -- reportSMDoc "mimer.assignMeta" 60 $ do
-    --   hi <- prettyTCM term
-    --   mt <- prettyTCM metaType
-    --   mv <- prettyTCM metaId
-    --   return $ "Assigning" <+> hi <+> "to meta variable" <+> mv <+> ":" <+> mt
     reportSMDoc "mimer.assignMeta" 60 $ do
       cxt <- getContextTelescope
       return $ "Assigning" <+> pretty term $+$ nest 2 ("to" <+> pretty metaId <+> ":" <+> pretty metaType $+$ "in context" <+> pretty cxt)
@@ -1457,7 +1466,9 @@ getLocalVars :: (MonadTCM tcm, MonadFresh CompId tcm)
   => Cost -> tcm [Component]
 getLocalVars cost = do
   typedTerms <- getLocalVarTerms
-  mapM (\(term, domTyp) -> newComponent [] cost noName term (unDom domTyp)) typedTerms
+  let varZeroDiscount (Var 0 []) = 1
+      varZeroDiscount _          = 0
+  mapM (\(term, domTyp) -> newComponent [] (cost - varZeroDiscount term) noName term (unDom domTyp)) typedTerms
 
 getLocalVarTerms :: (MonadTCM tcm, MonadFresh CompId tcm)
   => tcm [(Term, Dom Type)]
@@ -1602,7 +1613,7 @@ instance PrettyTCM Component where
     term <- prettyTCM $ compTerm comp
     typ <- prettyTCM $ compType comp
     metas <- prettyTCM $ compMetas comp
-    return $ pretty (compId comp) <+> "=" <+> term <+> ":" <+> typ <+> "with meta-variables" <+> metas
+    return $ pretty (compId comp) <+> "=" <+> term <+> ":" <+> typ <+> "with meta-variables" <+> metas <+> "and cost" <+> pretty (compCost comp)
 
 
 instance PrettyTCM MimerResult where
@@ -1646,14 +1657,14 @@ sepList s values = encloseSep "{ " " }" ", " $ map (\(n, v) -> n <> s <> v) valu
 
 
 writeTime :: (MonadFail m, ReadTCState m, MonadError TCErr m, MonadTCM m, MonadDebug m) => InteractionId -> Maybe CPUTime -> m ()
-writeTime ii mTime = verboseS "solvetime" 1 $ do
+writeTime ii mTime = do
   let time = case mTime of
         Nothing -> "n/a"
         Just (CPUTime t) -> show t
   file <- rangeFile . ipRange <$> lookupInteractionPoint ii
   case file of
     SMaybe.Nothing ->
-      reportSLn "solvetime" 2 "No file found for interaction id"
+      reportSLn "mimer.stats" 2 "No file found for interaction id"
     SMaybe.Just file -> do
       let path = filePath (rangeFilePath file) ++ ".stats"
       liftIO $ appendFile path (show (interactionId ii) ++ " " ++ time ++ "\n")

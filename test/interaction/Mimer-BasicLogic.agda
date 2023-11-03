@@ -81,11 +81,11 @@ h13 = {!!}
 
 
 n0 : {X : Set} {P Q : X → Set} → Σ X (λ x → P x ∨ Q x) → Σ X P ∨ Σ X Q
--- n0 = {!∨-e!}  -- no solution found, not even for the two subproofs
+-- n0 = {!∨-e!}  -- no solution found
 n0 = λ h → ∨-e _ _ _ (Σ.prf h) (λ x → ∨-i₁ (Σ-i (Σ.wit h) x)) (λ x → ∨-i₂ (Σ-i (Σ.wit h) x))
 
 n1 : {X : Set} {P Q : X → Set} → Σ X P ∨ Σ X Q → Σ X (λ x → P x ∨ Q x)
---n1 = {!∨-e!}  -- no solution found, not even for the two subproofs
+--n1 = {!∨-e!}  -- no solution found
 n1 = λ h → ∨-e _ _ _ h (λ x → Σ-i (Σ.wit x) (∨-i₁ (Σ.prf x))) (λ x → Σ-i (Σ.wit x) (∨-i₂ (Σ.prf x)))
 
 h14 : {X : Set} → (x : X) → Σ X (λ x → ⊤)

@@ -71,6 +71,12 @@ import Agda.Mimer.Options
 import System.IO.Unsafe (unsafePerformIO)
 import Data.IORef (IORef, writeIORef, readIORef, newIORef, modifyIORef')
 
+-- Temporary (used for custom cost verbosity hack)
+import qualified Agda.Utils.Maybe.Strict as Strict
+import qualified Agda.Utils.Trie as Trie
+import Agda.Interaction.Options.Base (parseVerboseKey)
+import Agda.Utils.List (lastWithDefault)
+
 data MimerResult
   = MimerExpr String -- ^ Returns 'String' rather than 'Expr' because the give action expects a string.
   | MimerClauses QName [A.Clause]
@@ -253,20 +259,20 @@ noCost = 0
 
 defaultCosts :: Costs
 defaultCosts = Costs
-  { costLocal = 10
-  , costFn = 20
-  , costDataCon = 10
-  , costRecordCon = 1
-  , costSpeculateProj = 30
-  , costProj = 5
-  , costAxiom = 20
-  , costLet = 10
-  , costLevel = 10
-  , costSet = 30
-  , costRecCall = 15
-  , costNewMeta = 3 -- MAKE IT MORE EXPENSIVE TO HAVE METAS IN THE COMPONENTS/
+  { costLocal = 3
+  , costFn = 10
+  , costDataCon = 3
+  , costRecordCon = 3
+  , costSpeculateProj = 20
+  , costProj = 3
+  , costAxiom = 10
+  , costLet = 5
+  , costLevel = 3
+  , costSet = 10
+  , costRecCall = 8
+  , costNewMeta = 10
   , costNewHiddenMeta = 1
-  , costCompReuse = \uses -> 2 * uses ^ 2
+  , costCompReuse = \uses -> 10 * (uses - 1) ^ 2
   }
 
 ------------------------------------------------------------------------------
@@ -731,12 +737,10 @@ runSearch options stopAfterFirst ii rng = withInteractionId ii $ do
           return [sol]
         _ -> __IMPOSSIBLE__
     _ -> do
-      costs <- ifM (hasVerbosity "randomcosts" 1)
-                 {- then -} (do
-                                costs <- liftIO randomCost
-                                reportDoc "randomcosts" 10 $ "Using costs:" $+$ nest 2 (pretty costs)
-                                return costs)
+      costs <- ifM (hasVerbosity "mimer.cost.custom" 10)
+                 {- then -} customCosts
                  {- else -} (return defaultCosts)
+      reportDoc "mimer.cost.custom" 10 $ "Using costs:" $+$ nest 2 (pretty costs)
       components <- collectComponents options costs ii mTheFunctionQName whereNames metaId
 
       startGoals <- mapM mkGoal metaIds
@@ -1669,26 +1673,34 @@ writeTime ii mTime = do
       let path = filePath (rangeFilePath file) ++ ".stats"
       liftIO $ appendFile path (show (interactionId ii) ++ " " ++ time ++ "\n")
 
--- TODO: This does not work well!
-randomCost :: IO Costs
-randomCost = do
-    CPUTime n <- liftIO $ getCPUTime
-    let (r1:r2:r3:r4:r5:r6:r7:r8:r9:r10:r11:r12:r13:r14:r15:_) = map (\c -> fromInteger $ c `mod` 50 + 1) $ iterate r n
-    return Costs
-      { costLocal = r1
-      , costFn = r2
-      , costDataCon = r3
-      , costRecordCon = r4
-      , costSpeculateProj = r5
-      , costProj = r6
-      , costAxiom = r7
-      , costLet = r8
-      , costLevel = r9
-      , costSet = r10
-      , costRecCall = r11
-      , costNewMeta = r12
-      , costNewHiddenMeta = r13
-      , costCompReuse = \uses -> r14 * uses ^ 2
-      }
+-- Hack to let you experiment with costs using verbosity flags.
+customCosts :: TCM Costs
+customCosts = do
+  costLocal         <- cost "local"
+  costFn            <- cost "fn"
+  costDataCon       <- cost "dataCon"
+  costRecordCon     <- cost "recordCon"
+  costSpeculateProj <- cost "speculateProj"
+  costProj          <- cost "proj"
+  costAxiom         <- cost "axiom"
+  costLet           <- cost "let"
+  costLevel         <- cost "level"
+  costSet           <- cost "set"
+  costRecCall       <- cost "recCall"
+  costNewMeta       <- cost "newMeta"
+  costNewHiddenMeta <- cost "newHiddenMeta"
+  compReuse         <- cost "compReuse"
+  let costCompReuse uses = compReuse * uses ^ 2
+  pure Costs{..}
   where
-    r n = a * n + c where a = 1103515245; c = 12345
+    cost key = getVerbosityLevel ("mimer.cost." ++ key)
+
+getVerbosityLevel :: MonadDebug m => VerboseKey -> m VerboseLevel
+getVerbosityLevel k = do
+  t <- getVerbosity
+  return $ case t of
+    Strict.Nothing -> 1
+    Strict.Just t
+      | t == Trie.singleton [] 0 -> 0
+      | otherwise -> lastWithDefault 0 $ Trie.lookupPath ks t
+  where ks = parseVerboseKey k
